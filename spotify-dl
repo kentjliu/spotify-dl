@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-spotify-dl: Download a Spotify track or playlist as a ZIP of MP3s.
+spotify-dl: Download a Spotify track or playlist as a ZIP of audio files.
 
 Usage:
-  spotify-dl <spotify_url> [output.zip]
+  spotify-dl <spotify_url> [output.zip] [-f FORMAT]
+
+Options:
+  -f FORMAT   Audio format: mp3, m4a, flac (default: mp3)
 
 Spotify credentials (required to avoid shared rate limits):
   Set these env vars or spotdl will use its own shared credentials:
@@ -15,6 +18,8 @@ Spotify credentials (required to avoid shared rate limits):
 Examples:
   spotify-dl https://open.spotify.com/track/...
   spotify-dl https://open.spotify.com/playlist/... my_playlist.zip
+  spotify-dl https://open.spotify.com/playlist/... -f flac
+  spotify-dl https://open.spotify.com/playlist/... my_playlist.zip -f m4a
 """
 
 import sys
@@ -25,6 +30,13 @@ import os
 import re
 import json
 import resource
+from enum import Enum
+
+
+class Format(str, Enum):
+    mp3  = "mp3"
+    m4a  = "m4a"
+    flac = "flac"
 
 
 def check_spotdl():
@@ -77,39 +89,57 @@ def raise_fd_limit():
         resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
 
 
-def download(url, output_zip):
+def download(url, output_zip, fmt: Format):
     raise_fd_limit()
     with tempfile.TemporaryDirectory() as tmpdir:
-        cmd = ["spotdl", url, "--output", tmpdir, "--threads", "2"]
+        cmd = ["spotdl", url, "--output", tmpdir, "--threads", "2", "--format", fmt.value]
 
-        print(f"Downloading: {url}")
+        print(f"Downloading: {url} (format: {fmt.value})")
         result = subprocess.run(cmd, cwd=tmpdir)
         if result.returncode != 0:
             print("spotdl exited with errors (some tracks may still have downloaded).")
 
-        mp3_files = [f for f in os.listdir(tmpdir) if f.endswith(".mp3")]
-        if not mp3_files:
-            print("No MP3 files downloaded. Check the URL and try again.")
+        audio_files = [f for f in os.listdir(tmpdir) if f.endswith(f".{fmt.value}")]
+        if not audio_files:
+            print("No audio files downloaded. Check the URL and try again.")
             sys.exit(1)
 
-        print(f"\nPacking {len(mp3_files)} track(s) into {output_zip} ...")
+        print(f"\nPacking {len(audio_files)} track(s) into {output_zip} ...")
         with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-            for fname in sorted(mp3_files):
+            for fname in sorted(audio_files):
                 zf.write(os.path.join(tmpdir, fname), fname)
 
     print(f"Done: {output_zip}")
 
 
 def main():
-    if len(sys.argv) < 2:
+    args = sys.argv[1:]
+    if not args:
         print(__doc__)
         sys.exit(1)
 
-    url = sys.argv[1]
+    url = args[0]
+    output_zip = None
+    fmt = Format.mp3
 
-    if len(sys.argv) >= 3:
-        output_zip = sys.argv[2]
-    else:
+    i = 1
+    while i < len(args):
+        if args[i] == "-f":
+            if i + 1 >= len(args):
+                print("Error: -f requires a format argument (mp3, m4a, flac)")
+                sys.exit(1)
+            try:
+                fmt = Format(args[i + 1])
+            except ValueError:
+                valid = ", ".join(f.value for f in Format)
+                print(f"Error: invalid format '{args[i + 1]}'. Choose from: {valid}")
+                sys.exit(1)
+            i += 2
+        else:
+            output_zip = args[i]
+            i += 1
+
+    if output_zip is None:
         slug = slugify(url.rstrip("/").split("/")[-1])
         output_zip = f"{slug or 'songs'}.zip"
 
@@ -118,7 +148,7 @@ def main():
 
     check_spotdl()
     inject_credentials()
-    download(url, output_zip)
+    download(url, output_zip, fmt)
 
 
 if __name__ == "__main__":

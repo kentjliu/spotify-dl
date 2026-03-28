@@ -1,6 +1,6 @@
 # spotify-dl
 
-Download a Spotify track or playlist as a ZIP of MP3s.
+Download a Spotify track or playlist as a ZIP of audio files.
 
 ## Requirements
 
@@ -45,8 +45,12 @@ sudo cp spotify-dl /usr/local/bin/spotify-dl
 ## Usage
 
 ```
-spotify-dl <spotify_url> [output.zip]
+spotify-dl <spotify_url> [output.zip] [-f FORMAT]
 ```
+
+| Option | Description | Choices | Default |
+|--------|-------------|---------|---------|
+| `-f`   | Audio format | `mp3`, `m4a`, `flac` | `mp3` |
 
 ```bash
 # Single track (auto-named zip)
@@ -57,6 +61,12 @@ spotify-dl <spotify_url> [output.zip]
 
 # Playlist with custom output filename
 ./spotify-dl https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M my_playlist.zip
+
+# Download as FLAC
+./spotify-dl https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M -f flac
+
+# Download as M4A with custom filename
+./spotify-dl https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M my_playlist.zip -f m4a
 ```
 
 The ZIP will be saved in the current directory.
