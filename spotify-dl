@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""
+spotify-dl: Download a Spotify track or playlist as a ZIP of MP3s.
+
+Usage:
+  spotify-dl <spotify_url> [output.zip]
+
+Spotify credentials (required to avoid shared rate limits):
+  Set these env vars or spotdl will use its own shared credentials:
+    SPOTIFY_CLIENT_ID
+    SPOTIFY_CLIENT_SECRET
+
+  Get free credentials at: https://developer.spotify.com/dashboard
+
+Examples:
+  spotify-dl https://open.spotify.com/track/...
+  spotify-dl https://open.spotify.com/playlist/... my_playlist.zip
+"""
+
+import sys
+import subprocess
+import tempfile
+import zipfile
+import os
+import re
+import json
+
+
+def check_spotdl():
+    try:
+        subprocess.run(["spotdl", "--version"], capture_output=True, check=True)
+    except FileNotFoundError:
+        print("spotdl not found. Installing...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "spotdl"], check=True)
+
+
+def slugify(text):
+    text = re.sub(r"[^\w\s-]", "", text).strip()
+    return re.sub(r"[\s]+", "_", text)
+
+
+def inject_credentials():
+    """Write credentials into spotdl config (CLI flags are ignored due to load_config: true)."""
+    client_id = os.environ.get("SPOTIFY_CLIENT_ID")
+    client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET")
+
+    if not client_id or not client_secret:
+        print("Warning: SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET not set.")
+        print("Using spotdl shared credentials — may hit rate limits.")
+        print("Get your own free credentials at: https://developer.spotify.com/dashboard\n")
+        return
+
+    config_path = os.path.expanduser("~/.spotdl/config.json")
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            cfg = json.load(f)
+        if cfg.get("client_id") != client_id or cfg.get("client_secret") != client_secret:
+            cfg["client_id"] = client_id
+            cfg["client_secret"] = client_secret
+            with open(config_path, "w") as f:
+                json.dump(cfg, f, indent=4)
+            # Clear cached token so the new credentials are used immediately
+            cache_path = os.path.expanduser("~/.spotdl/.spotipy")
+            if os.path.isfile(cache_path):
+                os.remove(cache_path)
+            elif os.path.isdir(cache_path):
+                import shutil
+                shutil.rmtree(cache_path)
+            print("Updated spotdl credentials.\n")
+
+
+def download(url, output_zip):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cmd = ["spotdl", url, "--output", tmpdir]
+
+        print(f"Downloading: {url}")
+        result = subprocess.run(cmd, cwd=tmpdir)
+        if result.returncode != 0:
+            print("spotdl exited with errors (some tracks may still have downloaded).")
+
+        mp3_files = [f for f in os.listdir(tmpdir) if f.endswith(".mp3")]
+        if not mp3_files:
+            print("No MP3 files downloaded. Check the URL and try again.")
+            sys.exit(1)
+
+        print(f"\nPacking {len(mp3_files)} track(s) into {output_zip} ...")
+        with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname in sorted(mp3_files):
+                zf.write(os.path.join(tmpdir, fname), fname)
+
+    print(f"Done: {output_zip}")
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+
+    url = sys.argv[1]
+
+    if len(sys.argv) >= 3:
+        output_zip = sys.argv[2]
+    else:
+        slug = slugify(url.rstrip("/").split("/")[-1])
+        output_zip = f"{slug or 'songs'}.zip"
+
+    if not output_zip.endswith(".zip"):
+        output_zip += ".zip"
+
+    check_spotdl()
+    inject_credentials()
+    download(url, output_zip)
+
+
+if __name__ == "__main__":
+    main()
