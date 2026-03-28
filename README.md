@@ -71,6 +71,15 @@ Your Spotify credentials have been rate limited. Fix:
 2. Clear the cached token: `rm ~/.spotdl/.spotipy`
 3. Re-run the script — it will inject your credentials automatically
 
+**`OSError: [Errno 24] Too many open files` (large playlists)**
+
+macOS has a low default file descriptor limit (256) which large playlists can exhaust. The script automatically raises this to 4096 and limits parallel downloads to 2 threads. If you still hit the error with very large playlists (500+ tracks), raise the limit further in your terminal session before running:
+
+```bash
+ulimit -n 8192
+./spotify-dl https://open.spotify.com/playlist/...
+```
+
 **No MP3s downloaded**
 
 - Check that the Spotify URL is public and accessible

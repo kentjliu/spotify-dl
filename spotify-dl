@@ -24,6 +24,7 @@ import zipfile
 import os
 import re
 import json
+import resource
 
 
 def check_spotdl():
@@ -69,9 +70,17 @@ def inject_credentials():
             print("Updated spotdl credentials.\n")
 
 
+def raise_fd_limit():
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = min(4096, hard)
+    if soft < target:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+
+
 def download(url, output_zip):
+    raise_fd_limit()
     with tempfile.TemporaryDirectory() as tmpdir:
-        cmd = ["spotdl", url, "--output", tmpdir]
+        cmd = ["spotdl", url, "--output", tmpdir, "--threads", "2"]
 
         print(f"Downloading: {url}")
         result = subprocess.run(cmd, cwd=tmpdir)
