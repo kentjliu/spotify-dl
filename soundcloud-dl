@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""
+soundcloud-dl: Download a SoundCloud track or playlist as a ZIP of audio files.
+
+Usage:
+  soundcloud-dl <soundcloud_url> [output.zip] [-f FORMAT]
+
+Options:
+  -f FORMAT   Audio format: mp3, m4a, flac (default: mp3)
+
+Requires yt-dlp (auto-installed on first run).
+
+Examples:
+  soundcloud-dl https://soundcloud.com/artist/track-name
+  soundcloud-dl https://soundcloud.com/artist/sets/playlist-name
+  soundcloud-dl https://soundcloud.com/artist/sets/playlist-name my_playlist.zip
+  soundcloud-dl https://soundcloud.com/artist/sets/playlist-name -f flac
+"""
+
+import sys
+import subprocess
+import tempfile
+import zipfile
+import os
+import re
+import resource
+from enum import Enum
+
+
+class Format(str, Enum):
+    mp3  = "mp3"
+    m4a  = "m4a"
+    flac = "flac"
+
+
+def check_ytdlp():
+    try:
+        subprocess.run(["yt-dlp", "--version"], capture_output=True, check=True)
+    except FileNotFoundError:
+        print("yt-dlp not found. Installing...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "yt-dlp"], check=True)
+
+
+def slugify(text):
+    text = re.sub(r"[^\w\s-]", "", text).strip()
+    return re.sub(r"[\s]+", "_", text)
+
+
+def raise_fd_limit():
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = min(4096, hard)
+    if soft < target:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+
+
+def download(url, output_zip, fmt: Format):
+    raise_fd_limit()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # yt-dlp extracts audio and converts to the desired format
+        cmd = [
+            "yt-dlp",
+            "--extract-audio",
+            "--audio-format", fmt.value,
+            "--audio-quality", "0",
+            "--output", os.path.join(tmpdir, "%(title)s.%(ext)s"),
+            "--no-overwrites",
+            "--concurrent-fragments", "2",
+            url,
+        ]
+
+        print(f"Downloading: {url} (format: {fmt.value})")
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            print("yt-dlp exited with errors (some tracks may still have downloaded).")
+
+        audio_files = [f for f in os.listdir(tmpdir) if f.endswith(f".{fmt.value}")]
+        if not audio_files:
+            print("No audio files downloaded. Check the URL and try again.")
+            sys.exit(1)
+
+        print(f"\nPacking {len(audio_files)} track(s) into {output_zip} ...")
+        with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname in sorted(audio_files):
+                zf.write(os.path.join(tmpdir, fname), fname)
+
+    print(f"Done: {output_zip}")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print(__doc__)
+        sys.exit(1)
+
+    url = args[0]
+    output_zip = None
+    fmt = Format.mp3
+
+    i = 1
+    while i < len(args):
+        if args[i] == "-f":
+            if i + 1 >= len(args):
+                print("Error: -f requires a format argument (mp3, m4a, flac)")
+                sys.exit(1)
+            try:
+                fmt = Format(args[i + 1])
+            except ValueError:
+                valid = ", ".join(f.value for f in Format)
+                print(f"Error: invalid format '{args[i + 1]}'. Choose from: {valid}")
+                sys.exit(1)
+            i += 2
+        else:
+            output_zip = args[i]
+            i += 1
+
+    if output_zip is None:
+        # Use last path segment as name (track or playlist slug)
+        slug = slugify(url.rstrip("/").split("/")[-1])
+        output_zip = f"{slug or 'songs'}.zip"
+
+    if not output_zip.endswith(".zip"):
+        output_zip += ".zip"
+
+    check_ytdlp()
+    download(url, output_zip, fmt)
+
+
+if __name__ == "__main__":
+    main()
